@@ -427,6 +427,13 @@ function reveal(){
     '</div>');
 }
 
+var ADVISORS = { tony:{name:"Anthony Smith",owner:"91493503"}, anthony:{name:"Anthony Smith",owner:"91493503"}, michael:{name:"Michael Ball",owner:"167065111"}, richard:{name:"Richard"}, steve:{name:"Steve"} };
+function advisorTag(){
+  try{ var q=new URLSearchParams(window.location.search);
+    var t=(q.get("adv")||q.get("utm_content")||"").toLowerCase().replace(/[^a-z]/g,"");
+    return ADVISORS[t] ? { tag:t, info:ADVISORS[t] } : null;
+  }catch(e){ return null; }
+}
 function postToHubSpot(){
   if (!CONFIG.hubspot.portalId || !CONFIG.hubspot.formGuid) return;
   var s = scoreProfile();
@@ -444,6 +451,11 @@ function postToHubSpot(){
       { name:"fra_risk_age",    value: String(state.age) },
       { name:"message",         value: "Risk quiz — capacity: " + s.capacity + ", tolerance: " + s.tolerance + "; priorities: " + pri }
     ], context: { pageUri: location.href, pageName: document.title } };
+  var a = advisorTag();
+  if (a) {
+    payload.fields.push({ name:"advisor_requested", value: a.info.name || a.tag });
+    if (a.info.owner) payload.fields.push({ name:"hubspot_owner_id", value: a.info.owner });
+  }
   fetch("https://api.hsforms.com/submissions/v3/integration/submit/" + CONFIG.hubspot.portalId + "/" + CONFIG.hubspot.formGuid, {
     method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload)
   }).catch(function(){});
