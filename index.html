@@ -423,11 +423,17 @@ function reveal(){
     '<p class="sub">' + esc(CONFIG.bands[band] || "") + '</p>' + gapNote +
     '<div class="card" style="margin-top:22px;">' +
       '<p style="margin-bottom:16px;font-size:15px;"><strong>Want a second set of eyes?</strong> A complimentary 20-minute call can walk through what your number means for how your savings are actually invested. No cost, no obligation.</p>' +
-      '<a class="btn" href="' + CONFIG.bookingUrl + '">Schedule a complimentary call</a>' +
+      bookingCta() +
     '</div>');
 }
 
-var ADVISORS = { tony:{name:"Anthony Smith",owner:"91493503"}, anthony:{name:"Anthony Smith",owner:"91493503"}, michael:{name:"Michael Ball",owner:"167065111"}, richard:{name:"Richard"}, steve:{name:"Steve"} };
+var ADVISORS = { tony:{name:"Anthony Smith",owner:"91493503",booking:"https://meetings-na2.hubspot.com/anthony-smith"}, anthony:{name:"Anthony Smith",owner:"91493503",booking:"https://meetings-na2.hubspot.com/anthony-smith"}, michael:{name:"Michael Ball",owner:"167065111",booking:null}, richard:{name:"Richard",booking:null}, steve:{name:"Steve",booking:null} };
+function bookingCta(){
+  var a = advisorTag();
+  if (a && !a.info.booking) return '<div class="btn" style="opacity:.65;cursor:default;pointer-events:none;">Online scheduling coming soon &mdash; we&rsquo;ll reach out to set up your call</div>';
+  var url = (a && a.info.booking) ? a.info.booking : CONFIG.bookingUrl;
+  return '<a class="btn" href="' + url + '">Schedule a complimentary call</a>';
+}
 function advisorTag(){
   try{ var q=new URLSearchParams(window.location.search);
     var t=(q.get("adv")||q.get("utm_content")||"").toLowerCase().replace(/[^a-z]/g,"");
