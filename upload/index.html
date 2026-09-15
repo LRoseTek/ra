@@ -31,7 +31,7 @@ body{
 }
 .wrap{max-width:620px;margin:0 auto;padding:36px 22px 72px}
 .brand{display:flex;justify-content:center;margin-bottom:26px}
-.brand img{height:42px;width:auto}
+.brand img{height:54px;width:auto}
 .card{
   background:var(--card);border:1px solid var(--line);border-radius:6px;
   padding:34px 32px 30px;box-shadow:0 1px 3px rgba(26,43,74,.06);
@@ -166,25 +166,39 @@ ul.hs-error-msgs{list-style:none;margin:4px 0 0;padding:0}
 
   var formId = (A && A.info.formGuid) ? A.info.formGuid : SHARED_FORM;
 
+  function showFailure(){
+    var t = document.getElementById("mrb-upload-form");
+    if (!t) return;
+    t.innerHTML = '<p style="color:#a32d2d;font-size:14.5px">The upload form ' +
+      'could not load. Please email your advisor and ask for a secure link.</p>';
+    if (window.console) console.error("MRB upload: embed failed to render", formId);
+  }
+
   if (window.hbspt && window.hbspt.forms) {
+    var ready = false;
+
     hbspt.forms.create({
       region:   "na2",
       portalId: "246032285",
       formId:   formId,
       target:   "#mrb-upload-form",
+      onFormReady: function(){ ready = true; },
       onFormSubmitted: function(){
         /* Surfaces in the console during testing; silent for clients. */
         if (window.console) console.log("MRB upload: submitted", formId);
       }
     });
-    /* If the embed never paints, say so rather than showing an empty card. */
+
+    /* If the embed never paints, say so rather than showing an empty card.
+
+       NOTE (15 Sept 2026): HubSpot renders this form inside an IFRAME, not as
+       inline markup, so an earlier check for a <form> element found nothing
+       and wiped out a form that had rendered perfectly well. Check for the
+       iframe too, and trust onFormReady above all. Do not "simplify" this
+       back to querySelector("form"). */
     setTimeout(function(){
       var t = document.getElementById("mrb-upload-form");
-      if (t && !t.querySelector("form")) {
-        t.innerHTML = '<p style="color:#a32d2d;font-size:14.5px">The upload form ' +
-          'could not load. Please email your advisor and ask for a secure link.</p>';
-        if (window.console) console.error("MRB upload: embed failed to render", formId);
-      }
+      if (!ready && t && !t.querySelector("form, iframe")) showFailure();
     }, 8000);
   } else {
     document.getElementById("mrb-upload-form").innerHTML =
