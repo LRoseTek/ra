@@ -153,7 +153,8 @@ var CONFIG = {
     "Moderately Conservative": "Your profile leans protective with room for measured growth. Postures like this generally hold a fixed-income core with a modest stock allocation for inflation protection.",
     "Moderate":                "Your profile balances growth and stability. Moderate postures generally pair meaningful stock exposure with a fixed-income cushion, accepting periodic declines in pursuit of long-term growth.",
     "Moderately Aggressive":   "Your profile leans toward growth. Postures like this generally carry substantial stock exposure with a smaller stabilizing allocation, accepting notable short-term swings.",
-    "Aggressive":              "Your profile prioritizes long-term growth. Aggressive postures generally hold predominantly stocks and accept large short-term swings in pursuit of higher long-term returns."
+    "Aggressive":              "Your profile prioritizes long-term growth. Aggressive postures generally hold predominantly stocks and accept large short-term swings in pursuit of higher long-term returns.",
+    "Most Aggressive":         "Your profile places growth above all else. Most-aggressive postures generally hold stocks almost exclusively and accept the largest short-term swings in pursuit of the highest long-term returns."
   }
 };
 /* ================================================== */
@@ -174,7 +175,7 @@ var QUESTIONS = [
     opts:[["Very stable — same or growing",70],["Mostly stable, normal fluctuation",60],["Variable — meaningful ups & downs",45],["Uncertain — major change expected",30]] },
   { id:"net_worth", section:"Context", type:"select", bucket:"capacity",
     text:"What is your liquid cash — e.g. checking, savings, money market (excluding retirement accounts)?",
-    opts:[["Under $100,000",30],["$100,000 – 500,000",50],["$500,000 – 1,000,000",65],["$1,000,000 – 5,000,000",75],["$5,000,000 – 25,000,000",85],["Over $25,000,000",90],["Prefer not to say",55]] },
+    opts:[["Under $100,000",30],["$100,000 – 500,000",50],["$500,000 – 1,000,000",65],["$1,000,000 – 5,000,000",75],["$5,000,000 – 10,000,000",82],["$10,000,000 – 15,000,000",88],["Over $15,000,000",93],["Prefer not to say",55]] },
   { id:"income_replacement", section:"Goals", type:"select", bucket:"capacity",
     text:"In retirement, what % of your current income do you want to replace?",
     opts:[["Less than 50%",50],["50 – 70%",60],["70 – 85% (typical)",70],["85 – 100%",75],["More than 100% — I want to live better",80],["Not applicable / already retired",50]] },
@@ -212,34 +213,106 @@ function brandmark(size, extra){
     '<img src="' + LOGO + '" alt="MRB Capital Group crest" style="width:' + size + 'px;height:' + size + 'px;object-fit:contain;display:block;"></a>';
 }
 var LOCK = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1a2b4a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-5px;margin-right:8px"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
-/* ---- Scoring: score_profile() port ---- */
-function scoreProfile(){
-  var cap = [], tol = [];
-  var age = parseInt(state.age, 10);
-  if (!isNaN(age)) cap.push(Math.max(20, Math.min(85, 95 - (age - 18))));
-  var ret = parseInt(state.answers.retirement_age, 10);
-  if (!isNaN(ret)){
-    var cur = isNaN(age) ? 45 : age;
-    cap.push(Math.min(90, 25 + Math.max(0, ret - cur) * 2.2));
+/* ---- Scoring: score_profile() port ----
+   MUST mirror client_portal.score_profile(). The dials below are the same
+   constants, with the same names, in the same order — when one side changes
+   the other has to follow, or a client scores differently depending on
+   whether they came through the quiz or the portal. */
+var CAPACITY_WEIGHTS = {
+  net_worth:3.0, withdrawal_rate:3.0, withdrawal_horizon:2.5,
+  emergency_fund:1.5, income_band:1.5, age:1.5,
+  income_stability:1.0, income_replacement:1.0,
+  legacy_intent:0.5, occupation:0.5
+};
+var DRAWDOWN_PENALTY = {
+  "More than 6%":18, "4 – 6%":9, "2 – 4% (typical)":3,
+  "Less than 2%":0, "Not sure yet":6
+};
+var HORIZON_CAP = { "Less than 2 years":30, "2 – 5 years":45, "5 – 10 years":62 };
+var HORIZON_CAP_DEPLETING = ["More than 6%", "4 – 6%"];
+var HORIZON_CAP_UNKNOWN_SLACK = 15;
+var EMERGENCY_FUND_CAP = { "Less than 1 month":45, "1 – 3 months":60, "3 – 6 months":75 };
+var CAP_SOFTNESS = 0.25;
+var TOLERANCE_LIFT = 6;
+var CAPACITY_WEIGHT_IN_BLEND = 0.60;
+var BAND_LABELS = ["Conservative","Moderately Conservative","Moderate",
+                   "Moderately Aggressive","Aggressive","Most Aggressive"];
+var BAND_THRESHOLDS = [38, 46, 55, 62, 70];
+
+/* Answers are stored as an INDEX into opts; the rules above key on the
+   label, so resolve it. */
+function answerLabel(qid){
+  for (var k = 0; k < QUESTIONS.length; k++){
+    if (QUESTIONS[k].id !== qid) continue;
+    var pick = state.answers[qid];
+    if (pick === undefined || !QUESTIONS[k].opts || !QUESTIONS[k].opts[pick]) return null;
+    return QUESTIONS[k].opts[pick][0];
   }
+  return null;
+}
+function softCap(value, limit){
+  if (limit === null || limit === undefined || value <= limit) return value;
+  return limit + (value - limit) * CAP_SOFTNESS;
+}
+function scoreProfile(){
+  var capNum = 0, capDen = 0, tol = [];
+  var age = parseInt(state.age, 10);
+  if (!isNaN(age)){
+    var ageScore = Math.max(20, Math.min(85, 95 - (age - 18)));
+    capNum += ageScore * CAPACITY_WEIGHTS.age; capDen += CAPACITY_WEIGHTS.age;
+  }
+  /* retirement_age is still asked — it drives planning — but no longer
+     scores: it measured the same fact as withdrawal_horizon. */
   QUESTIONS.forEach(function(q){
     if (q.type !== "select") return;
     var pick = state.answers[q.id];
-    if (pick === undefined) return;
-    var pts = q.opts[pick][1];
+    if (pick === undefined || !q.opts[pick]) return;
+    var label = q.opts[pick][0], pts = q.opts[pick][1];
     if (pts === null) return;
-    (q.bucket === "capacity" ? cap : tol).push(pts);
+    if (q.bucket === "capacity"){
+      /* being in withdrawal is charged once, below, scaled to the draw */
+      if (q.id === "occupation" && label === "Retired") pts = 50;
+      if (q.id === "income_replacement" && label === "Not applicable / already retired") pts = 60;
+      var w = CAPACITY_WEIGHTS[q.id] === undefined ? 1.0 : CAPACITY_WEIGHTS[q.id];
+      capNum += pts * w; capDen += w;
+    } else if (q.bucket === "tolerance"){
+      tol.push(pts);
+    }
   });
+  var c = capDen ? (capNum / capDen) : 50;
+  var occ = answerLabel("occupation"), inc = answerLabel("income_replacement");
+  if (occ === "Retired" || inc === "Not applicable / already retired"){
+    var rate0 = answerLabel("withdrawal_rate");
+    var pen = DRAWDOWN_PENALTY[rate0];
+    c -= (pen === undefined ? 6 : pen);
+  }
+  var start = answerLabel("withdrawal_horizon"), rate = answerLabel("withdrawal_rate");
+  var horizonLimit = 99;
+  if (HORIZON_CAP[start] !== undefined){
+    if (HORIZON_CAP_DEPLETING.indexOf(rate) !== -1) horizonLimit = HORIZON_CAP[start];
+    else if (rate === null || rate === "Not sure yet") horizonLimit = HORIZON_CAP[start] + HORIZON_CAP_UNKNOWN_SLACK;
+  }
+  c = softCap(c, horizonLimit);
+  var fundLimit = EMERGENCY_FUND_CAP[answerLabel("emergency_fund")];
+  c = softCap(c, fundLimit === undefined ? 99 : fundLimit);
+  c = Math.max(1, Math.min(99, c));
   function avg(a){ return a.length ? a.reduce(function(x,y){return x+y;},0)/a.length : 50; }
-  var c = avg(cap), t = avg(tol);
-  var overall = Math.round(Math.max(1, Math.min(99, Math.min(0.60*c + 0.40*t, c))));
+  var t = avg(tol);
+  var blended = CAPACITY_WEIGHT_IN_BLEND * c + (1 - CAPACITY_WEIGHT_IN_BLEND) * t;
+  var overall = Math.round(Math.max(1, Math.min(99, Math.min(blended, c + TOLERANCE_LIFT))));
   return { capacity: Math.round(c), tolerance: Math.round(t), overall: overall };
 }
-function bandFor(capacity, tolerance){
-  var bands = ["Conservative","Moderately Conservative","Moderate","Moderately Aggressive","Aggressive"];
-  function tier(s){ return s < 38 ? 0 : s < 50 ? 1 : s < 62 ? 2 : s < 74 ? 3 : 4; }
-  var ct = tier(capacity), tt = tier(tolerance);
-  return bands[ct < tt ? ct : Math.min(ct, Math.floor((ct + tt + 1) / 2))];
+/* Banded on the OVERALL score so the label always agrees with the number
+   shown beside it. Was a capacity x tolerance matrix, which could print
+   "54 - Moderately Aggressive" while that band started at 55. */
+function bandFor(capacity, tolerance, overall){
+  if (overall === undefined || overall === null){
+    var blended = CAPACITY_WEIGHT_IN_BLEND * capacity + (1 - CAPACITY_WEIGHT_IN_BLEND) * tolerance;
+    overall = Math.round(Math.max(1, Math.min(99, Math.min(blended, capacity + TOLERANCE_LIFT))));
+  }
+  var idx = 0;
+  for (var k = 0; k < BAND_THRESHOLDS.length; k++) if (overall >= BAND_THRESHOLDS[k]) idx++;
+  return BAND_LABELS[idx];
 }
 /* ---- SCREEN 1: Welcome ---- */
 function welcome(){
@@ -358,7 +431,7 @@ function register(){
 /* ---- SCREEN 6: Reveal (dashboard-equivalent ring) ---- */
 function reveal(){
   var s = scoreProfile();
-  var band = bandFor(s.capacity, s.tolerance);
+  var band = bandFor(s.capacity, s.tolerance, s.overall);
   /* make_risk_ring() tick math: score 0 -> -45deg, 99 -> +45deg from top */
   var ang = (-45 + (Math.max(1, Math.min(99, s.overall)) / 99) * 90) * Math.PI / 180;
   var sin = Math.sin(ang), cos = Math.cos(ang);
@@ -445,7 +518,7 @@ function postToHubSpot(){
       { name:"address",   value: state.lead.address || "" },
       { name:"zip",       value: state.lead.zip || "" },
       { name:"fra_risk_score",  value: String(s.overall) },
-      { name:"fra_risk_label",  value: bandFor(s.capacity, s.tolerance) },
+      { name:"fra_risk_label",  value: bandFor(s.capacity, s.tolerance, s.overall) },
       { name:"fra_risk_age",    value: String(state.age) },
       { name:"message",         value: "Risk quiz — capacity: " + s.capacity + ", tolerance: " + s.tolerance + "; priorities: " + pri }
     ], context: { pageUri: location.href, pageName: document.title } };
