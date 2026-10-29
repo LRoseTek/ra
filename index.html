@@ -545,12 +545,17 @@ function postToHubSpot(){
       { name:"fra_risk_score",  value: String(s.overall) },
       { name:"fra_risk_label",  value: bandFor(s.capacity, s.tolerance, s.overall) },
       { name:"fra_risk_age",    value: String(state.age) },
-      { name:"message",         value: "Risk quiz — capacity: " + s.capacity + ", tolerance: " + s.tolerance + "; priorities: " + pri },
-      /* The full answer set, so the advisor app can render a real risk
-         summary. Without it HubSpot holds only the three scores, and a
-         summary built from that is a badge over an empty questionnaire.
-         Encoded as id=label, one per line — readable in HubSpot, and
-         parsed back by mrb_file_summaries.py. */
+      /* The full answer set rides in `message`, NOT only in a custom field.
+         HubSpot's Forms API silently drops any field that isn't defined on
+         the form (verified 2026-10-29: HTTP 200, contact created,
+         fra_risk_answers absent), and `message` is the one multi-line field
+         all four quiz forms already carry. Line 1 keeps the old
+         "Risk quiz — capacity…" headline so anything that read it still
+         works; the lines after it are id=label, one per answer, parsed by
+         mrb_file_summaries.py and copied into fra_risk_answers by the
+         scheduled job. fra_risk_answers is still posted too — it lands the
+         day someone adds the field to the forms, and costs nothing until then. */
+      { name:"message",         value: "Risk quiz — capacity: " + s.capacity + ", tolerance: " + s.tolerance + "; priorities: " + pri + "\n" + answersForHubSpot() },
       { name:"fra_risk_answers", value: answersForHubSpot() }
     ], context: { pageUri: location.href, pageName: document.title } };
   var a = advisorTag();
