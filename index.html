@@ -505,6 +505,31 @@ function advisorTag(){
     return ADVISORS[t] ? { tag:t, info:ADVISORS[t] } : null;
   }catch(e){ return null; }
 }
+/* Serialise the answers for HubSpot: "question_id=chosen label", one per
+   line, plus the age collected in the pre-quiz. Labels rather than indexes
+   so the value stays meaningful if the option list is ever reordered, and
+   so a human reading the contact record can understand it. */
+function answersForHubSpot(){
+  /* capacity and tolerance ride along so the summary's two side gauges
+     render. Only the overall score has its own HubSpot property, and a
+     document showing one filled dial and two blank ones looks broken. */
+  var sc = scoreProfile();
+  var lines = ["age=" + state.age,
+               "capacity=" + sc.capacity,
+               "tolerance=" + sc.tolerance];
+  QUESTIONS.forEach(function(q){
+    var pick = state.answers[q.id];
+    if (pick === undefined || pick === null || pick === "") return;
+    if (q.type === "number"){ lines.push(q.id + "=" + pick); return; }
+    if (q.type === "multi"){
+      var picked = (pick || []).map(function(i){ return q.opts[i]; });
+      if (picked.length) lines.push(q.id + "=" + picked.join(" | "));
+      return;
+    }
+    if (q.opts && q.opts[pick]) lines.push(q.id + "=" + q.opts[pick][0]);
+  });
+  return lines.join("\n");
+}
 function postToHubSpot(){
   if (!CONFIG.hubspot.portalId || !CONFIG.hubspot.formGuid) return;
   var s = scoreProfile();
@@ -520,7 +545,13 @@ function postToHubSpot(){
       { name:"fra_risk_score",  value: String(s.overall) },
       { name:"fra_risk_label",  value: bandFor(s.capacity, s.tolerance, s.overall) },
       { name:"fra_risk_age",    value: String(state.age) },
-      { name:"message",         value: "Risk quiz — capacity: " + s.capacity + ", tolerance: " + s.tolerance + "; priorities: " + pri }
+      { name:"message",         value: "Risk quiz — capacity: " + s.capacity + ", tolerance: " + s.tolerance + "; priorities: " + pri },
+      /* The full answer set, so the advisor app can render a real risk
+         summary. Without it HubSpot holds only the three scores, and a
+         summary built from that is a badge over an empty questionnaire.
+         Encoded as id=label, one per line — readable in HubSpot, and
+         parsed back by mrb_file_summaries.py. */
+      { name:"fra_risk_answers", value: answersForHubSpot() }
     ], context: { pageUri: location.href, pageName: document.title } };
   var a = advisorTag();
   if (a) {
