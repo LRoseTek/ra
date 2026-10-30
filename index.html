@@ -145,6 +145,11 @@
 /* ===================== CONFIG ===================== */
 var CONFIG = {
   hubspot: { portalId: "246032285", formGuid: "f3520611-5f4b-45ba-91a8-1d92e5495c67" },   /* default / fallback form */
+  /* Relay that tells GitHub a quiz was just submitted, so the risk summary
+     files within a minute instead of waiting on the scheduled run. A Google
+     Apps Script web-app URL (holds the GitHub token server-side; this page
+     never sees it). Empty string = don't ping; the schedule still runs. */
+  summaryTrigger: "https://script.google.com/macros/s/AKfycbzo5spQvAmPiLM9aFkpTK6EoH_8bRwYbl2zsufyOhHyKcFuKwKDCguVXsm1vovfwro1/exec",
   bookingUrl: "https://meetings-na2.hubspot.com/anthony-smith",   /* HubSpot Meetings (from client_portal.py SCHEDULE_URL) */
   firmUrl: "https://www.mrb-capital-group.com",
   termsUrl: "https://www.mrb-capital-group.com/terms",  /* T&C + Privacy page */
@@ -573,8 +578,26 @@ function postToHubSpot(){
     if (!r.ok) {
       console.error("MRB risk quiz: HubSpot submit failed", r.status, "form", guid);
       r.text().then(function(t){ console.error("MRB risk quiz: response", t); }).catch(function(){});
+      return;
     }
+    triggerSummary(a ? a.tag : "");
   }).catch(function(e){ console.error("MRB risk quiz: HubSpot submit error", e); });
+}
+/* Fire-and-forget ping to the relay AFTER HubSpot has the submission, so the
+   run it starts finds a contact to file. No client data goes to the relay —
+   just the event name and which advisor link was used. `keepalive` lets the
+   request complete even if the client closes the tab on the results screen;
+   `no-cors` because we don't need to read the reply. */
+function triggerSummary(advTag){
+  var url = CONFIG.summaryTrigger;
+  if (!url) return;
+  try {
+    fetch(url, {
+      method: "POST", mode: "no-cors", keepalive: true,
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ event: "quiz-submitted", adv: advTag || "", at: new Date().toISOString() })
+    }).catch(function(e){ console.error("MRB risk quiz: summary trigger failed", e); });
+  } catch (e) { console.error("MRB risk quiz: summary trigger error", e); }
 }
 var SCREENS = { welcome:welcome, prequiz:prequiz, quiz:quiz, ready:resultsReady, register:register, reveal:reveal };
 window.MRBQ = {
